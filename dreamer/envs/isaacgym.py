@@ -1,4 +1,3 @@
-
 import gym
 import numpy as np
 import torch
@@ -35,6 +34,7 @@ class IsaacGymWrapper(gym.Env):
             dtype=np.float32,
             shape=(self.isaac_env.num_obs,),
         )
+        self.num_envs = isaac_env.num_envs
 
     def reset(self):
         state, _ = self.isaac_env.reset()
@@ -48,8 +48,8 @@ class IsaacGymWrapper(gym.Env):
         state, privileged_state, reward, done, info = self.isaac_env.step(action)
         return (
             np.array(state.cpu(), dtype=np.float32),
-            (reward.cpu().squeeze()),
-            (done.cpu().squeeze()),
+            (reward.cpu()),
+            (done.cpu()),
             info,
         )
 
@@ -61,5 +61,6 @@ class IsaacGymWrapper(gym.Env):
 
     def seed(self, seed=None):
         if seed is not None:
-            np.random.seed(seed)
-            self.isaac_env.seed(seed)
+            from legged_gym.utils.helpers import set_seed
+
+            set_seed(seed)

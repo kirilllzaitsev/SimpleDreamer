@@ -2,27 +2,30 @@ from dreamer.utils.utils import attrdict_monkeypatch_fix
 
 attrdict_monkeypatch_fix()
 
-from attrdict import AttrDict
 import numpy as np
 import torch
+from attrdict import AttrDict
+
 
 class ReplayBuffer(object):
-    def __init__(self, observation_shape, action_size, device, config):
+    def __init__(self, observation_shape, action_size, device, config, num_envs=1):
         self.config = config.parameters.dreamer.buffer
         self.device = device
         self.capacity = int(self.config.capacity)
 
         state_type = np.uint8 if len(observation_shape) < 3 else np.float32
 
+        # how does buffer look like for multiple envs?
         self.observation = np.empty(
-            (self.capacity, *observation_shape), dtype=state_type
+            (self.capacity, num_envs, *observation_shape), dtype=state_type
         )
         self.next_observation = np.empty(
-            (self.capacity, *observation_shape), dtype=state_type
+            (self.capacity, num_envs, *observation_shape), dtype=state_type
         )
-        self.action = np.empty((self.capacity, action_size), dtype=np.float32)
-        self.reward = np.empty((self.capacity, 1), dtype=np.float32)
-        self.done = np.empty((self.capacity, 1), dtype=np.float32)
+        self.action = np.empty((self.capacity, num_envs, action_size), dtype=np.float32)
+        self.reward = np.empty((self.capacity, num_envs, 1), dtype=np.float32)
+        self.done = np.empty((self.capacity, num_envs, 1), dtype=np.float32)
+        self.num_envs = num_envs
 
         self.buffer_index = 0
         self.full = False
@@ -49,6 +52,7 @@ class ReplayBuffer(object):
         assert self.full or (
             last_filled_index > batch_size
         ), "too short dataset or too long chunk_size"
+
         sample_index = np.random.randint(
             0, self.capacity if self.full else last_filled_index, batch_size
         ).reshape(-1, 1)
@@ -56,16 +60,36 @@ class ReplayBuffer(object):
 
         sample_index = (sample_index + chunk_length) % self.capacity
 
-        observation = torch.as_tensor(
-            self.observation[sample_index], device=self.device
-        ).float()
-        next_observation = torch.as_tensor(
-            self.next_observation[sample_index], device=self.device
-        ).float()
+        # batch_size *= self.num_envs
 
-        action = torch.as_tensor(self.action[sample_index], device=self.device)
-        reward = torch.as_tensor(self.reward[sample_index], device=self.device)
-        done = torch.as_tensor(self.done[sample_index], device=self.device)
+        observation = (
+            torch.as_tensor(self.observation[sample_index], device=self.device)
+            .float()
+            .transpose(1, 2)
+            .flatten(0, 1)
+        )
+        next_observation = (
+            torch.as_tensor(self.next_observation[sample_index], device=self.device)
+            .float()
+            .transpose(1, 2)
+            .flatten(0, 1)
+        )
+
+        action = (
+            torch.as_tensor(self.action[sample_index], device=self.device)
+            .transpose(1, 2)
+            .flatten(0, 1)
+        )
+        reward = (
+            torch.as_tensor(self.reward[sample_index], device=self.device)
+            .transpose(1, 2)
+            .flatten(0, 1)
+        )
+        done = (
+            torch.as_tensor(self.done[sample_index], device=self.device)
+            .transpose(1, 2)
+            .flatten(0, 1)
+        )
 
         sample = AttrDict(
             {
