@@ -1,19 +1,19 @@
 import os
 import sys
 
-from dreamer.envs.isaacgym import get_env
-
+from isaacgym import gymapi
 os.environ["MUJOCO_GL"] = "egl"
 
 import argparse
 from datetime import datetime
 
-from torch.utils.tensorboard import SummaryWriter
 
 from dreamer.algorithms.dreamer import Dreamer
 from dreamer.algorithms.plan2explore import Plan2Explore
 from dreamer.envs.envs import get_env_infos, make_atari_env, make_dmc_env
+from dreamer.envs.isaacgym import get_env
 from dreamer.utils.utils import ConsoleOutputWrapper, get_base_directory, load_config
+from torch.utils.tensorboard import SummaryWriter
 
 
 def main(args):
@@ -22,7 +22,6 @@ def main(args):
     if config.environment.benchmark == "atari":
         env = make_atari_env(
             task_name=config.environment.task_name,
-            seed=config.environment.seed,
             height=config.environment.height,
             width=config.environment.width,
             skip_frame=config.environment.frame_skip,
@@ -42,6 +41,7 @@ def main(args):
         )
     elif config.environment.benchmark == "isaacgym":
         env, env_cfg = get_env(args)
+        env.seed(config.environment.seed)
     obs_shape, discrete_action_bool, action_size = get_env_infos(env)
 
     log_dir = create_log_dir(config)
