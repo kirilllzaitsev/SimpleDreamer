@@ -43,6 +43,7 @@ class ReplayBuffer(object):
     def sample(self, batch_size, chunk_size):
         """
         (batch_size, chunk_size, input_size)
+        chunk_size: number of consecutive frames to be sampled
         """
         last_filled_index = self.buffer_index - chunk_size + 1
         assert self.full or (

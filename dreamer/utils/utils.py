@@ -1,19 +1,22 @@
-
 def attrdict_monkeypatch_fix():
     import collections
     import collections.abc
+
     for type_name in collections.abc.__all__:
-            setattr(collections, type_name, getattr(collections.abc, type_name))
+        setattr(collections, type_name, getattr(collections.abc, type_name))
+
+
 attrdict_monkeypatch_fix()
 
 import os
+import sys
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 import yaml
 from attrdict import AttrDict
+
 
 def horizontal_forward(network, x, y=None, input_shape=(-1,), output_shape=(-1,)):
     batch_with_horizon_shape = x.shape[: -len(input_shape)]
@@ -31,7 +34,14 @@ def horizontal_forward(network, x, y=None, input_shape=(-1,), output_shape=(-1,)
 
 def build_network(input_size, hidden_size, num_layers, activation, output_size):
     assert num_layers >= 2, "num_layers must be at least 2"
-    activation = getattr(nn, activation)()
+    # activation = getattr(nn, activation)() if isinstance(activation, str) else activation
+    if isinstance(activation, str):
+        activation = getattr(nn, activation)()
+    elif isinstance(activation, type):
+        activation = activation()
+    else:
+        activation = activation
+
     layers = []
     layers.append(nn.Linear(input_size, hidden_size))
     layers.append(activation)
@@ -64,6 +74,7 @@ def create_normal_dist(
     min_std=0.1,
     activation=None,
     event_shape=None,
+    return_std=False,
 ):
     if std == None:
         mean, std = torch.chunk(x, 2, -1)
@@ -77,6 +88,8 @@ def create_normal_dist(
     dist = torch.distributions.Normal(mean, std)
     if event_shape:
         dist = torch.distributions.Independent(dist, event_shape)
+    if return_std:
+        return dist, std
     return dist
 
 
@@ -145,7 +158,26 @@ def get_base_directory():
 def load_config(config_path):
     if not config_path.endswith(".yml"):
         config_path += ".yml"
-    config_path = find_file(config_path)
+    if len(config_path.split("/")) == 1:
+        config_path = find_file(config_path)
+
     with open(config_path) as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
     return AttrDict(config)
+
+
+class ConsoleOutputWrapper:
+    def __init__(self, filename, mode="w"):
+        self.terminal = sys.stdout
+        self.log = open(filename, mode)
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
+    def close(self):
+        self.log.close()
