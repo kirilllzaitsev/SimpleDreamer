@@ -23,7 +23,7 @@ parameters :
         batch_size : 50
         batch_length : 50
         collect_interval : 100 #tmp
-        num_interaction_episodes : 1
+        num_steps_per_env : 24
         seed_episodes : 5
         num_evaluate : 3
         

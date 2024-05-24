@@ -157,11 +157,10 @@ class Dreamer:
         self.tot_timesteps = 0
         self.tot_time = 0
         self.num_steps_per_env = (
-            # not fully correct. there is a while not done loop in environment_interaction
-            self.config.num_interaction_episodes
+            self.config.num_steps_per_env
             * self.config.batch_length
         )
-        self.num_envs = 1
+        self.num_envs = env.num_envs
         ep_infos = []
         rewbuffer = deque(maxlen=100)
         lenbuffer = deque(maxlen=100)
@@ -202,7 +201,7 @@ class Dreamer:
 
             start = time.time()
             interaction_info = self.environment_interaction(
-                env, self.config.num_interaction_episodes
+                env, self.config.num_steps_per_env
             )
             rewbuffer.extend(interaction_info["rewbuffer"])
             lenbuffer.extend(interaction_info["lenbuffer"])
@@ -365,7 +364,8 @@ class Dreamer:
         return self.environment_interaction(env, self.config.num_evaluate, train=False)
 
     def dynamic_learning(self, data):
-        prior, deterministic = self.rssm.recurrent_model_input_init(len(data.action))
+        batch_size = len(data.action)
+        prior, deterministic = self.rssm.recurrent_model_input_init(batch_size)
 
         data.embedded_observation = self.encoder(data.observation)
 
@@ -538,31 +538,29 @@ class Dreamer:
         return losses
 
     @torch.no_grad()
-    def environment_interaction(self, env, num_interaction_episodes, train=True):
+    def environment_interaction(self, env, num_steps_per_env, train=True):
         ep_infos = []
         rewbuffer = deque(maxlen=100)
         lenbuffer = deque(maxlen=100)
-        cur_reward_sum = torch.zeros(1, dtype=torch.float)
-        cur_episode_length = torch.zeros(1, dtype=torch.float)
-        score_lst = []
+        cur_reward_sum = torch.zeros(self.num_envs, dtype=torch.float)
+        cur_episode_length = torch.zeros(self.num_envs, dtype=torch.float)
 
-        for epi in range(num_interaction_episodes):
-            posterior, deterministic = self.rssm.recurrent_model_input_init(1)
-            action = torch.zeros(1, self.action_size).to(self.device)
+        for epi in range(num_steps_per_env):
+            posterior, deterministic = self.rssm.recurrent_model_input_init(self.num_envs)
+            action = torch.zeros(self.num_envs, self.action_size).to(self.device)
 
             observation = env.reset()
             embedded_observation = self.encoder(
                 torch.from_numpy(observation).float().to(self.device)
             )
 
-            score = 0
             done = False
 
-            while not done:
+            for i in range(self.num_steps_per_env):
                 deterministic = self.rssm.recurrent_model(
                     posterior, action, deterministic
                 )
-                embedded_observation = embedded_observation.reshape(1, -1)
+                embedded_observation = embedded_observation.reshape(self.num_envs, -1)
                 _, posterior = self.rssm.representation_model(
                     embedded_observation, deterministic
                 )
@@ -581,7 +579,6 @@ class Dreamer:
                     self.buffer.add(
                         observation, buffer_action, reward, next_observation, done
                     )
-                score += reward
                 embedded_observation = self.encoder(
                     torch.from_numpy(next_observation).float().to(self.device)
                 )
@@ -592,38 +589,17 @@ class Dreamer:
                     ep_infos.append(info["episode"])
                 cur_reward_sum += reward
                 cur_episode_length += 1
-                if done:
-                    rewbuffer.append(cur_reward_sum.item())
-                    lenbuffer.append(cur_episode_length.item())
-                    cur_reward_sum = torch.zeros(1, dtype=torch.float)
-                    cur_episode_length = torch.zeros(1, dtype=torch.float)
-                # new_ids = (done > 0).nonzero(as_tuple=False)
-                # rewbuffer.extend(cur_reward_sum[new_ids].tolist())
-                # lenbuffer.extend(cur_episode_length[new_ids].tolist())
-                # cur_reward_sum[new_ids] = 0
-                # cur_episode_length[new_ids] = 0
-
-                if done:
-                    if train:
-                        self.num_total_episode += 1
-                        self.writer.add_scalar(
-                            "training score", score, self.num_total_episode
-                        )
-                    else:
-                        score_lst.append(score)
-                    break
-
-        if not train:
-            evaluate_score = sum(score_lst) / len(score_lst)
-            print("evaluate score : ", evaluate_score)
-            self.writer.add_scalar("test score", evaluate_score, self.num_total_episode)
-            return evaluate_score
+                new_ids = (done > 0).nonzero(as_tuple=False)
+                # TODO: ensure correct indexing
+                rewbuffer.extend(cur_reward_sum[new_ids][:, 0].tolist())
+                lenbuffer.extend(cur_episode_length[new_ids][:, 0].tolist())
+                cur_reward_sum[new_ids] = 0
+                cur_episode_length[new_ids] = 0
 
         return {
             "rewbuffer": rewbuffer,
             "lenbuffer": lenbuffer,
             "ep_infos": ep_infos,
-            "score": np.mean(score_lst),
         }
 
     @torch.no_grad()
